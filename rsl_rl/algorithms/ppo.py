@@ -49,6 +49,11 @@ class PPO:
         symmetry_cfg: dict | None = None,
         # Distributed training parameters
         multi_gpu_cfg: dict | None = None,
+        # L2C2 smoothness loss
+        use_smoothness_loss: bool = True,
+        value_smoothness_coef: float = 0.1,
+        smoothness_upper_bound: float = 1.0,
+        smoothness_lower_bound: float = 0.0,
     ) -> None:
         # Device-related parameters
         self.device = device
@@ -126,6 +131,12 @@ class PPO:
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
         self.value_group_weight = torch.tensor(value_group_weight, device=self.device)
 
+        # Smoothness loss parameters
+        self.use_smoothness_loss = use_smoothness_loss
+        self.value_smoothness_coef = value_smoothness_coef
+        self.smoothness_upper_bound = smoothness_upper_bound
+        self.smoothness_lower_bound = smoothness_lower_bound
+
     def act(self, obs: TensorDict) -> torch.Tensor:
         if self.policy.is_recurrent:
             self.transition.hidden_states = self.policy.get_hidden_states()
@@ -153,6 +164,8 @@ class PPO:
         reward_groups = self.storage.num_critics
         if rewards.shape[-1] == 1 and reward_groups > 1:
             rewards = rewards.expand(-1, reward_groups)
+        elif len(rewards.shape) == 1:
+            rewards = rewards.unsqueeze(-1)
         elif rewards.shape[-1] != reward_groups:
             raise ValueError(
                 f"Received rewards with shape {rewards.shape} but rollout storage expects "
@@ -222,6 +235,8 @@ class PPO:
         # Iterate over batches
         for (
             obs_batch,
+            next_obs_batch,
+            # cont_batch,
             actions_batch,
             target_values_batch,
             advantages_batch,
@@ -242,6 +257,7 @@ class PPO:
 
             # Perform symmetric augmentation
             if self.symmetry and self.symmetry["use_data_augmentation"]:
+                raise NotImplementedError("Symmetry augmentation is not supported for L2C2 currently.")
                 # Augmentation using symmetry
                 data_augmentation_func = self.symmetry["data_augmentation_func"]
                 # Returned shape: [batch_size * num_aug, ...]
@@ -357,6 +373,21 @@ class PPO:
                     loss += self.symmetry["mirror_loss_coeff"] * symmetry_loss
                 else:
                     symmetry_loss = symmetry_loss.detach()
+
+            # Smoothness loss
+            if self.use_smoothness_loss:
+                # Smooth loss
+                epsilon = self.smoothness_lower_bound / (self.smoothness_upper_bound - self.smoothness_lower_bound)
+                policy_smooth_coef = self.smoothness_upper_bound * epsilon; value_smooth_coef = self.value_smoothness_coef * policy_smooth_coef
+
+                mix_weights = torch.rand(next_obs_batch.shape[0], device=self.device) 
+                mix_obs_batch = obs_batch + mix_weights.squeeze(-1) * (next_obs_batch - obs_batch)
+
+                policy_smooth_loss = torch.square(torch.norm(mu_batch - self.policy.act_inference(mix_obs_batch), dim=-1)).mean()
+                value_smooth_loss = torch.square(torch.norm(value_batch - self.policy.evaluate(mix_obs_batch), dim=-1)).mean()
+                smooth_loss = policy_smooth_coef * policy_smooth_loss + value_smooth_coef * value_smooth_loss
+
+                loss += smooth_loss
 
             # RND loss
             # TODO: Move this processing to inside RND module.

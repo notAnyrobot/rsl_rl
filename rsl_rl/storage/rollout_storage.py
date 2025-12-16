@@ -131,21 +131,22 @@ class RolloutStorage:
     def mini_batch_generator(self, num_mini_batches: int, num_epochs: int = 8) -> Generator:
         if self.training_type != "rl":
             raise ValueError("This function is only available for reinforcement learning training.")
-        batch_size = self.num_envs * self.num_transitions_per_env
+        batch_size = self.num_envs * (self.num_transitions_per_env - 1)
         mini_batch_size = batch_size // num_mini_batches
         indices = torch.randperm(num_mini_batches * mini_batch_size, requires_grad=False, device=self.device)
 
         # Core
-        observations = self.observations.flatten(0, 1)
-        actions = self.actions.flatten(0, 1)
-        values = self.values.flatten(0, 1)
-        returns = self.returns.flatten(0, 1)
+        observations = self.observations[:-1].flatten(0, 1)
+        next_observations = self.observations[1:].flatten(0, 1)
+        actions = self.actions[:-1].flatten(0, 1)
+        values = self.values[:-1].flatten(0, 1)
+        returns = self.returns[:-1].flatten(0, 1)
 
         # For PPO
-        old_actions_log_prob = self.actions_log_prob.flatten(0, 1)
-        advantages = self.advantages.flatten(0, 1)
-        old_mu = self.mu.flatten(0, 1)
-        old_sigma = self.sigma.flatten(0, 1)
+        old_actions_log_prob = self.actions_log_prob[:-1].flatten(0, 1)
+        advantages = self.advantages[:-1].flatten(0, 1)
+        old_mu = self.mu[:-1].flatten(0, 1)
+        old_sigma = self.sigma[:-1].flatten(0, 1)
 
         for epoch in range(num_epochs):
             for i in range(num_mini_batches):
@@ -156,6 +157,7 @@ class RolloutStorage:
 
                 # Create the mini-batch
                 obs_batch = observations[batch_idx]
+                next_obs_batch = next_observations[batch_idx]
                 actions_batch = actions[batch_idx]
                 target_values_batch = values[batch_idx]
                 returns_batch = returns[batch_idx]
@@ -171,6 +173,7 @@ class RolloutStorage:
                 # Yield the mini-batch
                 yield (
                     obs_batch,
+                    next_obs_batch,
                     actions_batch,
                     target_values_batch,
                     advantages_batch,
