@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from itertools import chain
+from typing import Tuple
 from tensordict import TensorDict
 
 from rsl_rl.modules import ActorCritic, ActorCriticCNN, ActorCriticRecurrent
@@ -32,6 +33,7 @@ class PPO:
         clip_param: float = 0.2,
         gamma: float = 0.99,
         lam: float = 0.95,
+        value_group_weight: Tuple[float, ...] = (1.0,),
         value_loss_coef: float = 1.0,
         entropy_coef: float = 0.01,
         learning_rate: float = 0.001,
@@ -122,6 +124,7 @@ class PPO:
         self.schedule = schedule
         self.learning_rate = learning_rate
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
+        self.value_group_weight = torch.tensor(value_group_weight, device=self.device)
 
     def act(self, obs: TensorDict) -> torch.Tensor:
         if self.policy.is_recurrent:
@@ -146,7 +149,16 @@ class PPO:
 
         # Record the rewards and dones
         # Note: We clone here because later on we bootstrap the rewards based on timeouts
-        self.transition.rewards = rewards.clone()
+        rewards = rewards.clone()
+        reward_groups = self.storage.num_critics
+        if rewards.shape[-1] == 1 and reward_groups > 1:
+            rewards = rewards.expand(-1, reward_groups)
+        elif rewards.shape[-1] != reward_groups:
+            raise ValueError(
+                f"Received rewards with shape {rewards.shape} but rollout storage expects "
+                f"{reward_groups} reward groups."
+            )
+        self.transition.rewards = rewards
         self.transition.dones = dones
 
         # Compute the intrinsic rewards and add to extrinsic rewards
@@ -158,9 +170,8 @@ class PPO:
 
         # Bootstrapping on time outs
         if "time_outs" in extras:
-            self.transition.rewards += self.gamma * torch.squeeze(
-                self.transition.values * extras["time_outs"].unsqueeze(1).to(self.device), 1
-            )
+            timeout_mask = extras["time_outs"].unsqueeze(-1).to(self.device)
+            self.transition.rewards += self.gamma * self.transition.values * timeout_mask
 
         # Record the transition
         self.storage.add_transition(self.transition)
@@ -172,7 +183,7 @@ class PPO:
         # Compute value for the last step
         last_values = self.policy.evaluate(obs).detach()
         # Compute returns and advantages
-        advantage = 0
+        advantage = torch.zeros_like(last_values)
         for step in reversed(range(st.num_transitions_per_env)):
             # If we are at the last step, bootstrap the return value
             next_values = last_values if step == st.num_transitions_per_env - 1 else st.values[step + 1]
@@ -185,10 +196,13 @@ class PPO:
             # Return: R_t = A(s_t, a_t) + V(s_t)
             st.returns[step] = advantage + st.values[step]
         # Compute the advantages
-        st.advantages = st.returns - st.values
+        advantages = st.returns - st.values
         # Normalize the advantages if per minibatch normalization is not used
         if not self.normalize_advantage_per_mini_batch:
-            st.advantages = (st.advantages - st.advantages.mean()) / (st.advantages.std() + 1e-8)
+            advantages = (advantages - advantages.mean(dim=(0, 1), keepdim=True)) / (
+                advantages.std(dim=(0, 1), keepdim=True) + 1e-8
+            )
+        st.advantages = (advantages * self.value_group_weight.view(1, 1, -1)).sum(dim=-1, keepdim=True)
 
     def update(self) -> dict[str, float]:
         mean_value_loss = 0

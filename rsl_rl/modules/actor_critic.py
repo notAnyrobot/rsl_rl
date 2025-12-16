@@ -22,6 +22,7 @@ class ActorCritic(nn.Module):
         obs: TensorDict,
         obs_groups: dict[str, list[str]],
         num_actions: int,
+        num_critics: int = 1,
         actor_obs_normalization: bool = False,
         critic_obs_normalization: bool = False,
         actor_hidden_dims: tuple[int] | list[int] = [256, 256, 256],
@@ -65,8 +66,9 @@ class ActorCritic(nn.Module):
             self.actor_obs_normalizer = torch.nn.Identity()
 
         # Critic
-        self.critic = MLP(num_critic_obs, 1, critic_hidden_dims, activation)
+        self.critic = nn.ModuleList([MLP(num_critic_obs, 1, critic_hidden_dims, activation) for _ in range(num_critics)])
         print(f"Critic MLP: {self.critic}")
+        self.num_critics = num_critics
 
         # Critic observation normalization
         self.critic_obs_normalization = critic_obs_normalization
@@ -161,7 +163,9 @@ class ActorCritic(nn.Module):
     def evaluate(self, obs: TensorDict, **kwargs: dict[str, Any]) -> torch.Tensor:
         obs = self.get_critic_obs(obs)
         obs = self.critic_obs_normalizer(obs)
-        return self.critic(obs)
+        if self.num_critics == 1:
+            return self.critic[0](obs)
+        return torch.cat([critic(obs) for critic in self.critic], dim=-1)
 
     def get_actor_obs(self, obs: TensorDict) -> torch.Tensor:
         obs_list = [obs[obs_group] for obs_group in self.obs_groups["policy"]]

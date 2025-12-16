@@ -267,6 +267,17 @@ class OnPolicyRunner:
                 self.policy_cfg["critic_obs_normalization"] = self.cfg["empirical_normalization"]
 
         # Initialize the policy
+        num_critics = self.policy_cfg.get("num_critics", 1)
+        value_group_weight = self.alg_cfg.get("value_group_weight")
+        if value_group_weight is None:
+            self.alg_cfg["value_group_weight"] = tuple([1.0] * num_critics)
+        else:
+            if len(value_group_weight) != num_critics:
+                raise ValueError(
+                    f"`value_group_weight` must have {num_critics} entries, "
+                    f"but got {len(value_group_weight)} instead."
+                )
+            self.alg_cfg["value_group_weight"] = tuple(value_group_weight)
         actor_critic_class = eval(self.policy_cfg.pop("class_name"))
         actor_critic: ActorCritic | ActorCriticRecurrent | ActorCriticCNN = actor_critic_class(
             obs, self.cfg["obs_groups"], self.env.num_actions, **self.policy_cfg
@@ -274,7 +285,13 @@ class OnPolicyRunner:
 
         # Initialize the storage
         storage = RolloutStorage(
-            "rl", self.env.num_envs, self.cfg["num_steps_per_env"], obs, [self.env.num_actions], self.device
+            "rl",
+            self.env.num_envs,
+            self.cfg["num_steps_per_env"],
+            obs,
+            [self.env.num_actions],
+            num_critics,
+            self.device,
         )
 
         # Initialize the algorithm

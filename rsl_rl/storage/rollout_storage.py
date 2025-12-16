@@ -45,6 +45,7 @@ class RolloutStorage:
         num_transitions_per_env: int,
         obs: TensorDict,
         actions_shape: tuple[int] | list[int],
+        num_critics: int = 1,
         device: str = "cpu",
     ) -> None:
         self.training_type = training_type
@@ -52,6 +53,7 @@ class RolloutStorage:
         self.num_transitions_per_env = num_transitions_per_env
         self.num_envs = num_envs
         self.actions_shape = actions_shape
+        self.num_critics = num_critics
 
         # Core
         self.observations = TensorDict(
@@ -59,7 +61,7 @@ class RolloutStorage:
             batch_size=[num_transitions_per_env, num_envs],
             device=self.device,
         )
-        self.rewards = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+        self.rewards = torch.zeros(num_transitions_per_env, num_envs, num_critics, device=self.device)
         self.actions = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
         self.dones = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device).byte()
 
@@ -69,11 +71,11 @@ class RolloutStorage:
 
         # For reinforcement learning
         if training_type == "rl":
-            self.values = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+            self.values = torch.zeros(num_transitions_per_env, num_envs, num_critics, device=self.device)
             self.actions_log_prob = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
             self.mu = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
             self.sigma = torch.zeros(num_transitions_per_env, num_envs, *actions_shape, device=self.device)
-            self.returns = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+            self.returns = torch.zeros(num_transitions_per_env, num_envs, num_critics, device=self.device)
             self.advantages = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
 
         # For RNN networks
@@ -91,7 +93,10 @@ class RolloutStorage:
         # Core
         self.observations[self.step].copy_(transition.observations)
         self.actions[self.step].copy_(transition.actions)
-        self.rewards[self.step].copy_(transition.rewards.view(-1, 1))
+        rewards = transition.rewards
+        if rewards.shape[-1] == 1 and self.training_type == "rl" and self.num_critics > 1:
+            rewards = rewards.expand(-1, self.num_critics)
+        self.rewards[self.step].copy_(rewards.view(-1, self.num_critics))
         self.dones[self.step].copy_(transition.dones.view(-1, 1))
 
         # For distillation
