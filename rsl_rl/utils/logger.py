@@ -83,11 +83,11 @@ class Logger:
 
             # Update rewards and episode length
             if intrinsic_rewards is not None:
-                self.cur_ereward_sum += rewards
+                self.cur_ereward_sum += rewards.sum(-1)
                 self.cur_ireward_sum += intrinsic_rewards
                 self.cur_reward_sum += rewards + intrinsic_rewards
             else:
-                self.cur_reward_sum += rewards
+                self.cur_reward_sum += rewards.sum(-1)
             self.cur_episode_length += 1
 
             # Clear data for completed episodes
