@@ -66,7 +66,10 @@ class ActorCritic(nn.Module):
             self.actor_obs_normalizer = torch.nn.Identity()
 
         # Critic
-        self.critic = nn.ModuleList([MLP(num_critic_obs, 1, critic_hidden_dims, activation) for _ in range(num_critics)])
+        if num_critics < 2:
+            self.critic = MLP(num_critic_obs, 1, critic_hidden_dims, activation)
+        else:
+            self.critic = nn.ModuleList([MLP(num_critic_obs, 1, critic_hidden_dims, activation) for _ in range(num_critics)])
         print(f"Critic MLP: {self.critic}")
         self.num_critics = num_critics
 
@@ -163,8 +166,8 @@ class ActorCritic(nn.Module):
     def evaluate(self, obs: TensorDict, **kwargs: dict[str, Any]) -> torch.Tensor:
         obs = self.get_critic_obs(obs)
         obs = self.critic_obs_normalizer(obs)
-        if self.num_critics == 1:
-            return self.critic[0](obs)
+        if self.num_critics < 2:
+            return self.critic(obs)
         return torch.cat([critic(obs) for critic in self.critic], dim=-1)
 
     def get_actor_obs(self, obs: TensorDict) -> torch.Tensor:
