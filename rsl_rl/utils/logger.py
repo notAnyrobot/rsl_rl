@@ -81,13 +81,14 @@ class Logger:
             elif "log" in extras:
                 self.ep_extras.append(extras["log"])
 
+            assert rewards.ndim in (1, 2), f"Unexpected reward shape: {rewards.shape}"
             # Update rewards and episode length
             if intrinsic_rewards is not None:
-                self.cur_ereward_sum += rewards.sum(-1)
+                self.cur_ereward_sum += rewards.sum(dim=-1) if rewards.ndim > 1 else rewards
                 self.cur_ireward_sum += intrinsic_rewards
                 self.cur_reward_sum += rewards + intrinsic_rewards
             else:
-                self.cur_reward_sum += rewards.sum(-1)
+                self.cur_reward_sum += rewards.sum(dim=-1) if rewards.ndim > 1 else rewards
             self.cur_episode_length += 1
 
             # Clear data for completed episodes
