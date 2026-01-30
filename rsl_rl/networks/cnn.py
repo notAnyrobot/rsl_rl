@@ -1,4 +1,4 @@
-# Copyright (c) 2021-2025, ETH Zurich and NVIDIA CORPORATION
+# Copyright (c) 2021-2026, ETH Zurich and NVIDIA CORPORATION
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -147,7 +147,7 @@ class CNN(nn.Sequential):
         return self._output_dim
 
     def init_weights(self) -> None:
-        """Initialize the weights of the CNN with Xavier initialization."""
+        """Initialize the weights of the CNN with Kaiming initialization."""
         for idx, module in enumerate(self):
             if isinstance(module, nn.Conv2d):
                 torch.nn.init.kaiming_normal_(module.weight)
