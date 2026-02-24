@@ -66,10 +66,10 @@ class ActorCritic(nn.Module):
             self.actor_obs_normalizer = torch.nn.Identity()
 
         # Critic
-        if num_critics < 2:
-            self.critic = MLP(num_critic_obs, 1, critic_hidden_dims, activation)
-        else:
+        if num_critics > 1:
             self.critic = nn.ModuleList([MLP(num_critic_obs, 1, critic_hidden_dims, activation) for _ in range(num_critics)])
+        else:
+            self.critic = MLP(num_critic_obs, 1, critic_hidden_dims, activation)
         print(f"Critic MLP: {self.critic}")
         self.num_critics = num_critics
 
@@ -166,9 +166,10 @@ class ActorCritic(nn.Module):
     def evaluate(self, obs: TensorDict, **kwargs: dict[str, Any]) -> torch.Tensor:
         obs = self.get_critic_obs(obs)
         obs = self.critic_obs_normalizer(obs)
-        if self.num_critics < 2:
-            return self.critic(obs)
-        return torch.cat([critic(obs) for critic in self.critic], dim=-1)
+        if self.num_critics > 1:
+            return torch.cat([critic(obs) for critic in self.critic], dim=-1)
+
+        return self.critic(obs)
 
     def get_actor_obs(self, obs: TensorDict) -> torch.Tensor:
         obs_list = [obs[obs_group] for obs_group in self.obs_groups["policy"]]
@@ -203,3 +204,14 @@ class ActorCritic(nn.Module):
         """
         super().load_state_dict(state_dict, strict=strict)
         return True
+
+
+    def _build_actor(self):
+        """Build the actor network."""
+        raise NotImplementedError
+    
+    
+    def _build_critic(self):
+        """Build the critic network, enabling multiple value predictions."""
+        raise NotImplementedError
+        

@@ -268,16 +268,16 @@ class OnPolicyRunner:
 
         # Initialize the policy
         num_critics = self.policy_cfg.get("num_critics", 1)
-        value_group_weight = self.alg_cfg.get("value_group_weight")
-        if value_group_weight is None:
-            self.alg_cfg["value_group_weight"] = tuple([1.0] * num_critics)
+        value_weights = self.alg_cfg.get("value_weights")
+        if value_weights is None:
+            self.alg_cfg["value_weights"] = tuple([1.0] * num_critics)
         else:
-            if len(value_group_weight) != num_critics:
+            if len(value_weights) != num_critics:
                 raise ValueError(
-                    f"`value_group_weight` must have {num_critics} entries, "
-                    f"but got {len(value_group_weight)} instead."
+                    f"`value_weights` must have {num_critics} entries, "
+                    f"but got {len(value_weights)} instead."
                 )
-            self.alg_cfg["value_group_weight"] = tuple(value_group_weight)
+            self.alg_cfg["value_weights"] = tuple(value_weights)
         actor_critic_class = resolve_callable(self.policy_cfg.pop("class_name"))
         actor_critic: ActorCritic | ActorCriticRecurrent | ActorCriticCNN = actor_critic_class(
             obs, self.cfg["obs_groups"], self.env.num_actions, **self.policy_cfg

@@ -33,7 +33,7 @@ class PPO:
         clip_param: float = 0.2,
         gamma: float = 0.99,
         lam: float = 0.95,
-        value_group_weight: Tuple[float, ...] = (1.0,),
+        value_weights: Tuple[float, ...] = (1.0,),
         value_loss_coef: float = 1.0,
         entropy_coef: float = 0.01,
         learning_rate: float = 0.001,
@@ -128,7 +128,7 @@ class PPO:
         self.schedule = schedule
         self.learning_rate = learning_rate
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
-        self.value_group_weight = torch.tensor(value_group_weight, device=self.device)
+        self.value_weights = torch.tensor(value_weights, device=self.device)
 
         # Smoothness loss parameters
         self.use_smoothness_loss = use_smoothness_loss
@@ -214,7 +214,7 @@ class PPO:
             advantages = (advantages - advantages.mean(dim=(0, 1), keepdim=True)) / (
                 advantages.std(dim=(0, 1), keepdim=True) + 1e-8
             )
-        st.advantages = (advantages * self.value_group_weight.view(1, 1, -1)).sum(dim=-1, keepdim=True)
+        st.advantages = (advantages * self.value_weights.view(1, 1, -1)).sum(dim=-1, keepdim=True)
 
     def update(self) -> dict[str, float]:
         mean_value_loss = 0
