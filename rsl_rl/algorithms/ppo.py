@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 from itertools import chain
 from tensordict import TensorDict
+from typing import Tuple
 
 from rsl_rl.env import VecEnv
 from rsl_rl.extensions import RandomNetworkDistillation, resolve_rnd_config, resolve_symmetry_config
@@ -58,6 +59,11 @@ class PPO:
         symmetry_cfg: dict | None = None,
         # Distributed training parameters
         multi_gpu_cfg: dict | None = None,
+        # L2C2 smoothness loss
+        use_smoothness_loss: bool = True,
+        value_smoothness_coef: float = 0.1,
+        smoothness_upper_bound: float = 1.0,
+        smoothness_lower_bound: float = 0.0,
     ) -> None:
         """Initialize the algorithm with models, storage, and optimization settings."""
         # Device-related parameters
@@ -135,6 +141,12 @@ class PPO:
         self.schedule = schedule
         self.learning_rate = learning_rate
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
+
+        # Smoothness loss parameters
+        self.use_smoothness_loss = use_smoothness_loss
+        self.value_smoothness_coef = value_smoothness_coef
+        self.smoothness_upper_bound = smoothness_upper_bound
+        self.smoothness_lower_bound = smoothness_lower_bound
 
     def act(self, obs: TensorDict) -> torch.Tensor:
         """Sample actions and store transition data."""
@@ -357,6 +369,31 @@ class PPO:
                 # Compute the loss as the mean squared error
                 mseloss = torch.nn.MSELoss()
                 rnd_loss = mseloss(predicted_embedding, target_embedding)
+
+            # Smoothness loss
+            if self.use_smoothness_loss:
+                # Smooth loss
+                epsilon = self.smoothness_lower_bound / (
+                    self.smoothness_upper_bound - self.smoothness_lower_bound
+                )
+                policy_smooth_coef = self.smoothness_upper_bound * epsilon
+                value_smooth_coef = self.value_smoothness_coef * policy_smooth_coef
+
+                mix_weights = torch.rand(batch.next_observations.shape[0], device=self.device) 
+                mix_obs_batch = batch.observations + mix_weights.squeeze(-1) * (
+                    batch.next_observations - batch.observations
+                )
+                
+                policy_smooth_loss = torch.square(
+                    torch.norm(batch.actions - self.actor(mix_obs_batch), dim=-1)
+                ).mean()
+                value_smooth_loss = torch.square(
+                    torch.norm(batch.values - self.critic(mix_obs_batch), dim=-1)
+                ).mean()
+                smooth_loss = policy_smooth_coef * policy_smooth_loss
+                smooth_loss += value_smooth_coef * value_smooth_loss
+
+                loss += smooth_loss
 
             # Compute the gradients for PPO
             self.optimizer.zero_grad()

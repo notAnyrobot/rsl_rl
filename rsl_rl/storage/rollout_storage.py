@@ -74,6 +74,7 @@ class RolloutStorage:
         def __init__(
             self,
             observations: TensorDict | None = None,
+            next_observations: TensorDict | None = None,
             actions: torch.Tensor | None = None,
             values: torch.Tensor | None = None,
             advantages: torch.Tensor | None = None,
@@ -88,6 +89,9 @@ class RolloutStorage:
             """Initialize a batch container over rollout data."""
             self.observations: TensorDict | None = observations
             """Batch of observations."""
+
+            self.next_observations: TensorDict | None = next_observations
+            """Batch of next observations."""
 
             # For reinforcement learning
             self.actions: torch.Tensor | None = actions
@@ -223,18 +227,20 @@ class RolloutStorage:
         """Yield shuffled flat mini-batches for feedforward RL updates."""
         if self.training_type != "rl":
             raise ValueError("This function is only available for reinforcement learning training.")
-        batch_size = self.num_envs * self.num_transitions_per_env
+        batch_size = self.num_envs * (self.num_transitions_per_env - 1)
         mini_batch_size = batch_size // num_mini_batches
         indices = torch.randperm(num_mini_batches * mini_batch_size, requires_grad=False, device=self.device)
 
         # Flatten the data
-        observations = self.observations.flatten(0, 1)
-        actions = self.actions.flatten(0, 1)
-        values = self.values.flatten(0, 1)
-        returns = self.returns.flatten(0, 1)
-        old_actions_log_prob = self.actions_log_prob.flatten(0, 1)
-        advantages = self.advantages.flatten(0, 1)
-        old_distribution_params = tuple(p.flatten(0, 1) for p in self.distribution_params)  # type: ignore
+        # observations = self.observations.flatten(0, 1)
+        observations = self.observations[:-1, ...].flatten(0, 1)
+        next_observations = self.observations[1:, ...].flatten(0, 1)
+        actions = self.actions[:-1, ...].flatten(0, 1)
+        values = self.values[:-1, ...].flatten(0, 1)
+        returns = self.returns[:-1, ...].flatten(0, 1)
+        old_actions_log_prob = self.actions_log_prob[:-1, ...].flatten(0, 1)
+        advantages = self.advantages[:-1, ...].flatten(0, 1)
+        old_distribution_params = tuple(p[:-1, ...].flatten(0, 1) for p in self.distribution_params)  # type: ignore
 
         for epoch in range(num_epochs):
             for i in range(num_mini_batches):
@@ -246,6 +252,7 @@ class RolloutStorage:
                 # Yield the mini-batch
                 yield RolloutStorage.Batch(
                     observations=observations[batch_idx],  # type: ignore
+                    next_observations=next_observations[batch_idx],
                     actions=actions[batch_idx],
                     values=values[batch_idx],
                     advantages=advantages[batch_idx],
